@@ -1,0 +1,31 @@
+{
+  "name": "fleet-management-system",
+  "version": "1.0.0",
+  "description": "Fleet Management System: API gateway, microservices, Swagger docs, Mocha/Chai tests",
+  "main": "src/start.js",
+  "scripts": {
+    "start": "node src/start.js",
+    "start:demo": "DEMO_SEED=1 GEOCODER=mock node src/start.js",
+    "test": "mocha \"test/**/*.test.js\" --exit --timeout 10000",
+    "screenshots": "python3 scripts/screenshots.py"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.2.0",
+    "cors": "^2.8.6",
+    "express": "^4.22.3",
+    "jsonwebtoken": "^9.0.3",
+    "leaflet": "^1.9.4",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "chai": "^4.5.0",
+    "mocha": "^12.0.3",
+    "supertest": "^7.3.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

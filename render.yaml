@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: fleet-management
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: INTERNAL_SERVICE_TOKEN
+        generateValue: true
+      - key: GATEWAY_API_KEYS
+        value: demo-key-123,mobile-app-key-456
+      - key: DB_FILE
+        value: /tmp/fleet.db
+      - key: GEOCODER
+        value: osm
+      - key: SMS_PROVIDER
+        value: mock
+      - key: DEMO_SEED
+        value: "1"

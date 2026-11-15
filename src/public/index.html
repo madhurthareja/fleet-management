@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fleet Map</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px system-ui, sans-serif; display: flex; height: 100vh; color: #1f2937; }
+  aside { width: 330px; padding: 14px; overflow-y: auto; border-right: 1px solid #e5e7eb; background: #f9fafb; }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  h2 { font-size: 13px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; }
+  label { display: block; margin: 6px 0 2px; font-size: 12px; color: #4b5563; }
+  input { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; }
+  .row { display: flex; gap: 6px; }
+  button { margin-top: 8px; padding: 7px 12px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+  button.secondary { background: #4b5563; }
+  #map { flex: 1; }
+  #status { margin-top: 8px; font-size: 12px; color: #b91c1c; min-height: 16px; }
+  ul { list-style: none; padding: 0; margin: 6px 0; }
+  li { padding: 6px 8px; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 4px; }
+  li small { color: #6b7280; display: block; }
+  .pin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 3px rgba(0,0,0,.6); }
+</style>
+</head>
+<body>
+<aside>
+  <h1>🚚 Fleet Map</h1>
+  <label>API key</label><input id="apiKey" value="demo-key-123">
+  <div class="row">
+    <div><label>Username</label><input id="username" value="admin"></div>
+    <div><label>Password</label><input id="password" type="password" value="admin123"></div>
+  </div>
+  <button id="login">Sign in &amp; load vehicles</button>
+  <div id="status"></div>
+
+  <h2>Nearby search</h2>
+  <label>Address (geocoded via OpenStreetMap) or lat/lng</label>
+  <input id="address" placeholder="e.g. Connaught Place, New Delhi">
+  <div class="row">
+    <div><label>Lat</label><input id="lat" value="28.6139"></div>
+    <div><label>Lng</label><input id="lng" value="77.2090"></div>
+    <div><label>Radius km</label><input id="radius" value="10"></div>
+  </div>
+  <div class="row"><button id="search">Find nearby</button><button id="geocode" class="secondary">Geocode address</button></div>
+  <h2 id="resultsTitle">Vehicles</h2>
+  <ul id="results"></ul>
+  <h2>SMS notifications (admin/operator)</h2>
+  <button id="refreshSms" class="secondary" style="margin-top:0">Refresh log</button>
+  <ul id="sms"></ul>
+</aside>
+<div id="map"></div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const COLORS = { active: '#16a34a', idle: '#6b7280', maintenance: '#d97706', offline: '#dc2626' };
+let token = null;
+const map = L.map('map').setView([28.6139, 77.209], 10);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+const markers = L.layerGroup().addTo(map);
+let circle, centerMarker;
+
+// All API calls go through the gateway (this page is served under /api/maps/ui/).
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    ...opts,
+    headers: { 'x-api-key': $('apiKey').value, 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+const pin = (status) => L.divIcon({ className: '', html: `<div class="pin" style="background:${COLORS[status] || '#2563eb'}"></div>`, iconSize: [16, 16] });
+const popup = (v) => `<b>${v.plate}</b> ${v.model || ''}<br>Status: ${v.status}` + (v.distance_km != null ? `<br>${v.distance_km} km away` : '');
+
+function draw(vehicles, highlight) {
+  markers.clearLayers();
+  vehicles.forEach((v) => L.marker([v.lat, v.lng], { icon: pin(v.status) }).bindPopup(popup(v)).addTo(markers));
+  $('results').innerHTML = vehicles.map((v) => `<li><b>${v.plate}</b> — ${v.status}<small>${v.model || ''} ${v.distance_km != null ? '· ' + v.distance_km + ' km' : ''}</small></li>`).join('') || '<li>No vehicles</li>';
+  $('resultsTitle').textContent = highlight ? `Nearby vehicles (${vehicles.length})` : `All vehicles (${vehicles.length})`;
+  if (vehicles.length && !highlight) map.fitBounds(vehicles.map((v) => [v.lat, v.lng]), { padding: [40, 40], animate: false });
+}
+
+async function loadAll() {
+  const geo = await api('/maps/vehicles/geojson');
+  draw(geo.features.map((f) => ({ ...f.properties, lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] })), false);
+}
+
+$('login').onclick = async () => {
+  try {
+    $('status').textContent = '';
+    const r = await api('/users/login', { method: 'POST', body: JSON.stringify({ username: $('username').value, password: $('password').value }) });
+    token = r.token;
+    await loadAll();
+    await loadSms();
+    $('status').style.color = '#15803d';
+    $('status').textContent = `Signed in as ${r.user.username} (${r.user.role})`;
+  } catch (e) { $('status').style.color = '#b91c1c'; $('status').textContent = e.message; }
+};
+
+async function loadSms() {
+  try {
+    const list = await api('/notifications');
+    $('sms').innerHTML = list.slice(0, 8).map((n) => `<li><b style="color:${n.status === 'sent' ? '#15803d' : '#b91c1c'}">${n.status.toUpperCase()}</b> → ${n.recipient_phone}<small>${n.message}</small></li>`).join('') || '<li>No notifications yet</li>';
+  } catch (e) { $('sms').innerHTML = `<li>${e.message}</li>`; }
+}
+$('refreshSms').onclick = loadSms;
+
+$('geocode').onclick = async () => {
+  try {
+    const g = await api('/maps/geocode?address=' + encodeURIComponent($('address').value));
+    $('lat').value = g.lat.toFixed(5); $('lng').value = g.lng.toFixed(5);
+    $('status').style.color = '#15803d'; $('status').textContent = g.displayName;
+  } catch (e) { $('status').style.color = '#b91c1c'; $('status').textContent = e.message; }
+};
+
+$('search').onclick = async () => {
+  try {
+    const lat = $('lat').value, lng = $('lng').value, r = $('radius').value;
+    const res = await api(`/maps/nearby?lat=${lat}&lng=${lng}&radius_km=${r}`);
+    if (circle) map.removeLayer(circle);
+    if (centerMarker) map.removeLayer(centerMarker);
+    circle = L.circle([res.center.lat, res.center.lng], { radius: res.radius_km * 1000, color: '#2563eb', fillOpacity: 0.07 }).addTo(map);
+    centerMarker = L.marker([res.center.lat, res.center.lng]).bindPopup('Search center').addTo(map);
+    draw(res.vehicles, true);
+    map.fitBounds(circle.getBounds(), { animate: false });
+    $('status').style.color = '#15803d'; $('status').textContent = `${res.count} vehicle(s) within ${res.radius_km} km`;
+  } catch (e) { $('status').style.color = '#b91c1c'; $('status').textContent = e.message; }
+};
+</script>
+</body>
+</html>
