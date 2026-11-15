@@ -1,4 +1,6 @@
 // Shared SQLite database.
+const fs = require('fs');
+const path = require('path');
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
 const config = require('../config');
@@ -7,6 +9,7 @@ let db;
 
 function init(file = config.dbFile) {
   if (db) db.close();
+  if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   db = new Database(file);
   db.pragma('journal_mode = WAL');
   db.exec(`
