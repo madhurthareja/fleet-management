@@ -2,7 +2,9 @@
 
 Submitted by Madhur Thareja, 2023EBCS412
 
-Third-party integrations (geolocation + SMS), an Express API gateway, Swagger/OpenAPI docs and a Mocha/Chai test suite.
+Geolocation + SMS integrations, an Express API gateway, Swagger/OpenAPI docs, and a Mocha/Chai test suite.
+
+**Live:** https://fleet-management-tdum.onrender.com (free tier — first request after idle takes 30-50s)
 
 ```
 Browser / client ──► API Gateway :3000 ──► User Service          :3001  /api/users/*
@@ -13,7 +15,7 @@ Browser / client ──► API Gateway :3000 ──► User Service          :30
                                          (shared SQLite database: users, vehicles, telemetry, notifications)
 ```
 
-All services run in one Node process, but each is an independent Express app on its own port and they talk to each other over HTTP (Vehicle/Telemetry → Notification, Vehicle → Geolocation). 
+Each service is an independent Express app on its own port, run together in one Node process. They call each other over HTTP (Vehicle/Telemetry → Notification, Vehicle → Geolocation).
 
 ## Install & run
 
@@ -52,11 +54,13 @@ npm install
 npm test
 ```
 
+36 tests, 7 flows: login/JWT, vehicle registration, telemetry storage, status update → SMS, RBAC, nearby search (mocked geocoder), gateway API-key/rate-limit/503.
+
 ## Integrations
 
-**Geolocation** (`GEOCODER=osm|google|mock`) — address → lat/lng (used when registering a vehicle with an address, `/api/maps/geocode`, and `/api/maps/nearby?address=`); GPS readings from telemetry are stored and update the vehicle's last position; `/api/maps/nearby` returns vehicles within `radius_km` using the haversine formula, nearest first; `/api/maps/vehicles/geojson` feeds the Leaflet map. 
+**Geolocation** (`GEOCODER=osm|google|mock`) — address → lat/lng on vehicle registration, `/api/maps/geocode`, and `/api/maps/nearby?address=`. Telemetry GPS readings update the vehicle's last position. `/api/maps/nearby?lat&lng&radius_km` returns vehicles in range, nearest first (haversine). `/api/maps/vehicles/geojson` feeds the Leaflet map.
 
-**SMS** (`SMS_PROVIDER=mock|twilio`) — the mock provider stores every message and can simulate failures (numbers ending in `0000`). Every attempt is saved in the `notifications` table with `status = sent|failed`, provider id and error, and is queryable at `GET /api/notifications?status=failed`. SMS is sent to all admins when telemetry reports `engine_fault`, `low_battery` (or battery < 15 %) or `emergency_stop`, and to admins + the assigned driver when a vehicle's status really changes. Switching to Twilio only needs the `TWILIO_*` variables.
+**SMS** (`SMS_PROVIDER=mock|twilio`) — mock provider stores every message and fails numbers ending in `0000`. Each attempt is saved in `notifications` with `status = sent|failed`, provider id, and error; query failed ones at `GET /api/notifications?status=failed`. Sends to all admins on `engine_fault`, `low_battery` (battery < 15%), or `emergency_stop`; sends to admins + assigned driver on a status change. Switching to Twilio only needs the `TWILIO_*` env vars.
 
 ## Gateway behaviour
 
@@ -64,12 +68,12 @@ npm test
 |---|---|
 | no `x-api-key` | 401 |
 | unknown key | 403 |
-| more than `RATE_LIMIT_MAX` requests/window per key | 429 + `Retry-After` (headers `X-RateLimit-*` on every call) |
+| over `RATE_LIMIT_MAX` requests/window per key | 429 + `Retry-After` (`X-RateLimit-*` headers on every call) |
 | unknown `/api/...` route | 404 |
 | malformed JSON | 400 |
-| target service down / timeout (5 s) | 503 / 504 |
+| target service down / timeout (5s) | 503 / 504 |
 
-`/health`, `/api-docs` and the static map page are public. JWTs are verified by the services themselves; the gateway forwards `Authorization`.
+`/health`, `/api-docs`, and the map page are public. JWTs are verified by the services; the gateway forwards `Authorization`.
 
 ## Deliverables
 
@@ -78,10 +82,11 @@ npm test
 | OpenAPI docs | `src/docs/openapi.js`, served at `/api-docs` |
 | Gateway code | `src/gateway/gateway.js` |
 | Tests | `test/api.test.js` |
-| Deployment | not deployed from this environment; `Dockerfile` included (`docker build -t fleet . && docker run -p 3000:3000 fleet`), works on Render/Railway/Fly as-is |
-| Screenshots | `docs/screenshots/` (see below) |
+| Deployment | https://fleet-management-tdum.onrender.com · `Dockerfile` included for local/other hosts |
+| Screenshots | `docs/screenshots/` |
 
-Screenshots: `1-map-nearby-vehicles.png` (geolocation + nearby search), `2-sms-notification-log-ui.png` and `2b-sms-notification-api.png` (SMS generation), `3-gateway-routing-apikey-ratelimit.png` (gateway), `4-swagger-ui.png` / `4b-…detail.png` (docs). Regenerate with `npm run start:demo` then `npm run screenshots` (needs Playwright + Chrome). The map tiles are blank in the captured images only because the sandbox that produced them had no access to openstreetmap.org; the markers, search circle and results are real.
+Screenshots: `1-map-nearby-vehicles.png` (geolocation + nearby search), `2-sms-notification-log-ui.png` / `2b-sms-notification-api.png` (SMS), `3-gateway-routing-apikey-ratelimit.png` (gateway), `4-swagger-ui.png` / `4b-swagger-ui-endpoint-detail.png` (docs). Regenerate with `npm run start:demo` then `npm run screenshots` (needs Playwright + Chrome).
 
 ## Security notes
-Change `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN` and `GATEWAY_API_KEYS` before any real deployment; the demo users and keys are for testing only. The rate limiter is in-memory (per process).
+
+Change `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, and `GATEWAY_API_KEYS` before real use; the demo users/keys are for testing only. The rate limiter is in-memory, per process.
